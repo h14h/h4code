@@ -6,6 +6,23 @@
   - If changing native mobile code, `vp run lint:mobile` must also pass.
 - Use `vp test` for the built-in Vite+ test command and `vp run test` when you specifically need the `test` package script.
 
+## H4Code Fork Workflow
+
+- Keep `main` as a clean mirror of upstream `pingdotgg/t3code`. Do not commit personal customizations there.
+- Keep `dev` as the personal integration branch for H4Code. It should start with a small foundation commit containing only fork-local infrastructure and account configuration.
+- Create feature and bugfix branches from `dev`. Land completed work back into `dev` as small, reviewable commits or a squash commit when the branch is purely local.
+- If work may be upstreamable, cleanly split it before contribution: create a branch from `main`, cherry-pick only the relevant upstream-safe commit(s), and open the PR from that branch.
+- Prefer upstream's workflow shape even for fork-only work: small focused changes, deterministic tests, no unrelated refactors, and explicit notes for behavior, risk, and verification.
+- Keep fork-only commits easy to identify. Use commit subjects like `local: configure h4code mobile eas` for personal infrastructure and regular upstream-style subjects like `fix(mobile): ...` for generally useful fixes.
+- Enable `git rerere` locally so recurring rebase conflicts can be replayed: `git config rerere.enabled true`.
+
+### H4Code Mobile/EAS Overlay
+
+- The mobile app is built from `apps/mobile`; do not run EAS from the repository root.
+- H4Code Expo configuration belongs in the personal foundation commit: Expo owner/project, EAS project ID, bundle/package ID base, and preview build profiles.
+- Keep native build fixes, app feature work, and personal EAS/account wiring in separate commits. Native fixes are the most likely mobile changes to cherry-pick onto an upstream PR branch.
+- For preview builds, follow upstream's environment shape: `APP_VARIANT=preview`, `MOBILE_VERSION_POLICY=fingerprint`, and EAS environment `preview`.
+
 ## Project Snapshot
 
 T3 Code is a minimal web GUI for using coding agents like Codex and Claude.
