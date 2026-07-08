@@ -19,6 +19,8 @@
       "corepack": true,
       "env": {
         "APP_VARIANT": "preview",
+        "MOBILE_VERSION_POLICY": "fingerprint",
+        "T3CODE_MOBILE_RUNTIME_VERSION": "61650325c510a8cddde471e9b0faa78fb77f453d",
         "NODE_OPTIONS": "--max-old-space-size=4096"
       },
       "channel": "preview",
@@ -38,6 +40,19 @@
       "distribution": "internal",
       "android": {
         "buildType": "apk"
+      }
+    },
+    "preview:simulator": {
+      "corepack": true,
+      "env": {
+        "APP_VARIANT": "preview",
+        "MOBILE_VERSION_POLICY": "fingerprint"
+      },
+      "channel": "preview",
+      "environment": "preview",
+      "distribution": "internal",
+      "ios": {
+        "simulator": true
       }
     },
     "production": {

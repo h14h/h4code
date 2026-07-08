@@ -10,6 +10,14 @@ Object.assign(process.env, repoEnv);
 
 const APP_VARIANT = resolveAppVariant(repoEnv.APP_VARIANT);
 const isIosPersonalTeamBuild = repoEnv.T3CODE_IOS_PERSONAL_TEAM === "1";
+const EXPO_OWNER = nonEmpty(repoEnv.T3CODE_MOBILE_EXPO_OWNER) ?? "h14h";
+const EXPO_SLUG = nonEmpty(repoEnv.T3CODE_MOBILE_EXPO_SLUG) ?? "h4code";
+const APP_ID_BASE = nonEmpty(repoEnv.T3CODE_MOBILE_APP_ID_BASE) ?? "com.h14h.h4code";
+const APPLE_TEAM_ID = nonEmpty(repoEnv.T3CODE_MOBILE_APPLE_TEAM_ID);
+const EAS_PROJECT_ID =
+  nonEmpty(repoEnv.T3CODE_MOBILE_EAS_PROJECT_ID) ?? "64e1574c-280b-49a0-989e-471d942c0b4f";
+const EXPO_UPDATES_URL = `https://u.expo.dev/${EAS_PROJECT_ID}`;
+const MOBILE_RUNTIME_VERSION = nonEmpty(repoEnv.T3CODE_MOBILE_RUNTIME_VERSION);
 
 const personalTeamBundleIdentifier = repoEnv.T3CODE_IOS_PERSONAL_TEAM_BUNDLE_ID?.trim();
 const IOS_BUNDLE_IDENTIFIER_PATTERN = /^[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+$/;
@@ -63,24 +71,24 @@ const VARIANT_CONFIG = {
   development: {
     appName: "T3 Code Dev",
     scheme: "t3code-dev",
-    iosBundleIdentifier: "com.t3tools.t3code.dev",
-    androidPackage: "com.t3tools.t3code.dev",
+    iosBundleIdentifier: `${APP_ID_BASE}.dev`,
+    androidPackage: `${APP_ID_BASE}.dev`,
     relyingParty: "clerk.t3.codes",
     assets: DEVELOPMENT_ASSETS,
   },
   preview: {
     appName: "T3 Code Preview",
     scheme: "t3code-preview",
-    iosBundleIdentifier: "com.t3tools.t3code.preview",
-    androidPackage: "com.t3tools.t3code.preview",
+    iosBundleIdentifier: `${APP_ID_BASE}.preview`,
+    androidPackage: `${APP_ID_BASE}.preview`,
     relyingParty: "clerk.t3.codes",
     assets: PREVIEW_ASSETS,
   },
   production: {
     appName: "T3 Code",
     scheme: "t3code",
-    iosBundleIdentifier: "com.t3tools.t3code",
-    androidPackage: "com.t3tools.t3code",
+    iosBundleIdentifier: APP_ID_BASE,
+    androidPackage: APP_ID_BASE,
     relyingParty: "clerk.t3.codes",
     assets: RELEASE_ASSETS,
   },
@@ -95,6 +103,11 @@ function resolveAppVariant(value: string | undefined): AppVariant {
     default:
       return "production";
   }
+}
+
+function nonEmpty(value: string | undefined) {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : undefined;
 }
 
 const variant = VARIANT_CONFIG[APP_VARIANT];
@@ -158,15 +171,16 @@ const sharingPlugin: NonNullable<ExpoConfig["plugins"]>[number] = [
 
 const config: ExpoConfig = {
   name: variant.appName,
-  slug: "t3-code",
+  slug: EXPO_SLUG,
   platforms: ["ios", "android"],
   scheme: variant.scheme,
   version: "1.0.1",
-  runtimeVersion: {
+  runtimeVersion: MOBILE_RUNTIME_VERSION ?? {
     // Fingerprint (not appVersion) so an OTA only reaches binaries whose native
     // project — native deps, config plugins, AND patches/ — matches the update.
-    // With appVersion, every 0.1.0 build shares a runtime version, so a JS update
-    // could land on a binary missing the native changes it needs and crash.
+    // With appVersion, every build of the same app version shares a runtime
+    // version, so a JS update could land on a binary missing the native changes
+    // it needs and crash.
     policy: process.env.MOBILE_VERSION_POLICY ?? "fingerprint",
   },
   orientation: "portrait",
@@ -174,7 +188,7 @@ const config: ExpoConfig = {
   userInterfaceStyle: "automatic",
   updates: {
     enabled: true,
-    url: "https://u.expo.dev/d763fcb8-d37c-41ea-a773-b54a0ab4a454",
+    url: EXPO_UPDATES_URL,
     checkAutomatically: "ON_LOAD",
     fallbackToCacheTimeout: 0,
   },
@@ -185,10 +199,7 @@ const config: ExpoConfig = {
     // showcase capture build requires full screen (see infoPlist below).
     requireFullScreen: process.env.T3_SHOWCASE_CAPTURE_BUILD === "1",
     bundleIdentifier: iosBundleIdentifier,
-    // Pin code signing to the T3 Tools team so non-interactive `expo run:ios`
-    // does not fall back to a personal team (which cannot sign app groups,
-    // Sign in with Apple, or push notification entitlements).
-    appleTeamId: "ARK85ZXQ4Z",
+    ...(APPLE_TEAM_ID ? { appleTeamId: APPLE_TEAM_ID } : {}),
     associatedDomains: [
       `applinks:${variant.relyingParty}`,
       `webcredentials:${variant.relyingParty}`,
@@ -365,10 +376,10 @@ const config: ExpoConfig = {
       tracesToken: repoEnv.EXPO_PUBLIC_OTLP_TRACES_TOKEN ?? null,
     },
     eas: {
-      projectId: "d763fcb8-d37c-41ea-a773-b54a0ab4a454",
+      projectId: EAS_PROJECT_ID,
     },
   },
-  owner: "pingdotgg",
+  owner: EXPO_OWNER,
 };
 
 export default config;

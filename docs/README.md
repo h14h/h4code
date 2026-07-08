@@ -39,3 +39,6 @@ policy in [CONTRIBUTING.md](../CONTRIBUTING.md); agent rules in [AGENTS.md](../A
 - [Observability](./operations/observability.md)
 - [Relay observability](./operations/relay-observability.md)
 - [Mobile app store screenshots](./operations/mobile-app-store-screenshots.md)
+- [Syncing H4Code to the latest upstream nightly](./operations/upstream-sync.md)
+- [Composing the H4Code `serve` branch](./operations/serve-composition.md)
+- [Updating `serve` without breaking remote reconnects](./operations/upstream-dev-server-update.md)

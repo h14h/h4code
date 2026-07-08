@@ -1,0 +1,78 @@
+#!/usr/bin/env node
+import * as NodeChildProcess from "node:child_process";
+import * as NodeFS from "node:fs";
+import * as NodePath from "node:path";
+import * as NodeURL from "node:url";
+
+// PATH-friendly `pair` shortcut. Walks up from cwd to the H4Code monorepo, then
+// runs `h4code pair …`. Safe to symlink into ~/.local/bin as `pair`.
+
+const thisDir = NodePath.dirname(NodeURL.fileURLToPath(import.meta.url));
+const h4codeLauncher = NodePath.join(thisDir, "h4code");
+
+// Prefer the sibling launcher when this file is still inside the monorepo tree
+// (or when both are symlinked side-by-side into the same bin dir).
+if (NodeFS.existsSync(h4codeLauncher)) {
+  const result = NodeChildProcess.spawnSync(
+    process.execPath,
+    [h4codeLauncher, "pair", ...process.argv.slice(2)],
+    {
+      cwd: process.cwd(),
+      stdio: "inherit",
+      env: process.env,
+    },
+  );
+  if (result.error) {
+    throw result.error;
+  }
+  process.exit(result.status ?? 1);
+}
+
+// Fallback: if only `pair` was linked, reuse the walk-up logic inline.
+function findMonorepoRoot(startDir) {
+  let dir = NodePath.resolve(startDir);
+  while (true) {
+    const cliPath = NodePath.join(dir, "scripts", "h4code-cli.mjs");
+    const packagePath = NodePath.join(dir, "package.json");
+    if (NodeFS.existsSync(cliPath) && NodeFS.existsSync(packagePath)) {
+      try {
+        const pkg = JSON.parse(NodeFS.readFileSync(packagePath, "utf8"));
+        if (pkg.name === "@t3tools/monorepo") {
+          return dir;
+        }
+      } catch {
+        // keep walking
+      }
+    }
+    const parent = NodePath.dirname(dir);
+    if (parent === dir) {
+      return null;
+    }
+    dir = parent;
+  }
+}
+
+const repoRoot = findMonorepoRoot(process.cwd());
+if (repoRoot === null) {
+  console.error(
+    "Not inside an H4Code monorepo (no @t3tools/monorepo + scripts/h4code-cli.mjs above this directory).",
+  );
+  process.exit(1);
+}
+
+const cliPath = NodePath.join(repoRoot, "scripts", "h4code-cli.mjs");
+const result = NodeChildProcess.spawnSync(
+  process.execPath,
+  [cliPath, "pair", ...process.argv.slice(2)],
+  {
+    cwd: process.cwd(),
+    stdio: "inherit",
+    env: process.env,
+  },
+);
+
+if (result.error) {
+  throw result.error;
+}
+
+process.exit(result.status ?? 1);

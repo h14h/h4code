@@ -15,6 +15,17 @@ import * as ServerConfig from "../config.ts";
 import * as ProcessRunner from "../processRunner.ts";
 import { resolveServerEnvironmentLabel } from "./ServerEnvironmentLabel.ts";
 
+// Stamped by apps/server/vite.config.ts from APP_VERSION so a fork build reports
+// the upstream nightly it was built from instead of the in-repo package version,
+// which only moves on upstream release commits. Undefined under tests and dev.
+declare const __T3CODE_BUILD_APP_VERSION__: string | undefined;
+
+function resolveBuildAppVersion(): string {
+  const stamped =
+    typeof __T3CODE_BUILD_APP_VERSION__ === "undefined" ? "" : __T3CODE_BUILD_APP_VERSION__.trim();
+  return stamped.length > 0 ? stamped : packageJson.version;
+}
+
 export class ServerEnvironmentIdPersistenceError extends Schema.TaggedErrorClass<ServerEnvironmentIdPersistenceError>()(
   "ServerEnvironmentIdPersistenceError",
   {
@@ -139,7 +150,7 @@ export const make = Effect.gen(function* () {
       os: platformOs(hostPlatform),
       arch: platformArch(hostArchitecture),
     },
-    serverVersion: packageJson.version,
+    serverVersion: resolveBuildAppVersion(),
     capabilities: {
       repositoryIdentity: true,
       connectionProbe: true,

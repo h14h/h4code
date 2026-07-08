@@ -146,3 +146,44 @@ Full glossary with file links: `docs/internals/glossary.md`
 
 - Don't verify with browsers or computer use unless the user explicitly agrees or requests it.
 - Security is important, but should not be over-indexed on, especially for dev mode/maintainer-only features.
+
+## H4Code Fork Workflow
+
+- Keep `main` as a clean mirror of upstream `pingdotgg/t3code`. Do not commit personal customizations there.
+- Keep `dev` as the personal foundation branch for H4Code. It must contain exactly one fork-local foundation commit over the selected nightly, limited to infrastructure, account configuration, and workflow documentation.
+- Keep `serve` as the deployment integration branch. Rebuild it from `dev` by cherry-picking the currently selected independent patch branches; do not develop original changes directly on `serve`.
+- Record selected patch branches in order with repeated repository-local `h4code.servePatch` Git config values. An empty selection means `serve` points directly at `dev`. The `serve` history is the authoritative deployed composition; the config is the repeatable rebuild manifest.
+- Create feature and bugfix branches from `dev`. Land foundation-only work into the single `dev` commit; keep optional behavior on independent `patch/*` branches so it can be selected into `serve`.
+- If work may be upstreamable, cleanly split it before contribution: create a branch from `main`, cherry-pick only the relevant upstream-safe commit(s), and open the PR from that branch.
+- Prefer upstream's workflow shape even for fork-only work: small focused changes, deterministic tests, no unrelated refactors, and explicit notes for behavior, risk, and verification.
+- Keep fork-only commits easy to identify. Use commit subjects like `local: configure h4code mobile eas` for personal infrastructure and regular upstream-style subjects like `fix(mobile): ...` for generally useful fixes.
+- Enable `git rerere` locally so recurring rebase conflicts can be replayed: `git config rerere.enabled true`.
+- Invoke repo tooling as `pnpm exec vp …` or through a package script; never a bare `vp`. This workspace pins `vite-plus` through the catalog, but nothing puts `node_modules/.bin` on `PATH`, so a globally installed `vp` silently wins. A version-mismatched global CLI driving the pinned runtime makes every test file fail at `describe()` with `Cannot read properties of undefined (reading 'config')` and report "no tests" — which reads as broken code rather than broken tooling. Deploy builds go through `vp run build:h4code`, which resolves `node_modules/.bin/vp` explicitly for the same reason.
+- Use the fork-local server CLI, not `npx t3`. `npx t3` installs the published upstream package and can drift from the H4Code server that `h4code-server.service` runs.
+  - One-time: from the monorepo root, `bun run h4code:install-cli` (or `node scripts/h4code-install-cli.mjs`) symlinks `pair` and `h4code` into `~/.local/bin`. After that, from any cwd inside this monorepo: `pair --tailscale`, `h4code auth --help`.
+  - Without the PATH install, from the monorepo root only: `bun run pair -- --tailscale` / `bun run h4code -- …` (nested package.json files prevent root scripts from resolving in subdirectories).
+  - Both paths run `scripts/h4code-cli.mjs` → `apps/server/dist/bin.mjs` from this checkout.
+
+### Upstream/Nightly Sync
+
+In this fork, requests such as "pull in upstream", "rebase on latest upstream", "sync upstream", or "get latest nightly" mean the same workflow unless the user names a different ref:
+
+1. Fetch `upstream/main` and upstream tags, then resolve the newest nightly tag (`v*-nightly.*` or `nightly-v*`) by creation date. Treat that immutable nightly commit—not the moving head of `upstream/main`—as the integration target.
+2. Keep local `main` as a clean mirror of `upstream/main`, while rebasing `dev`'s single fork-local foundation commit onto the selected nightly commit.
+3. Discover every local `patch/*` branch and evaluate them one at a time against the upstream delta. A clean textual rebase is not enough: inspect whether upstream has semantically superseded the patch and whether changed surrounding code requires compatibility work.
+4. Before acting on each patch, report its intent, upstream overlap, continued relevance, compatibility findings, and proposed action. The assessment is descriptive, not a fixed status enum.
+5. Then either permanently discard a fully superseded or intentionally abandoned patch, rebase a still-relevant compatible patch unchanged, or rebase and amend its existing patch commit(s) with compatibility changes. Discard means the patch is irrelevant and will never be reused or contributed: remove it from the `serve` selection, rebuild `serve`, then delete its local branch, corresponding remote branch, and patch-specific backup refs. Do not add a separate "sync fix" commit. Ask the user when relevance or the right compatibility behavior is ambiguous; otherwise describe the obvious action and proceed.
+6. Verify `dev` and every retained patch independently. Do not combine patches or merge patch branches into `dev`.
+7. Rebuild `serve` from the rewritten `dev` by cherry-picking each branch named by `git config --local --get-all h4code.servePatch` in config order. Verify the combined result separately because individually correct patches can interact. Resolve mechanical cherry-pick conflicts in the `serve` copies; represent durable interaction behavior as an explicit patch rather than undocumented `serve`-only code.
+8. Unless the user explicitly requests a sync-only operation, deploy the verified `serve` branch to the persistent server: install from the frozen lockfile, run the production build, restart `h4code-server.service`, and verify that the local and Tailnet descriptors retain the expected environment ID. Never deploy `dev` or a standalone `patch/*` branch as the stable server.
+9. Do not push rewritten refs or delete other remote branches unless the user explicitly requests it. Permanently discarded patch branches are the exception defined above.
+
+Follow [`docs/operations/upstream-sync.md`](docs/operations/upstream-sync.md) for the full integration procedure, [`docs/operations/serve-composition.md`](docs/operations/serve-composition.md) for selecting and rebuilding concurrent patches, and [`docs/operations/upstream-dev-server-update.md`](docs/operations/upstream-dev-server-update.md) for the required build, restart, reconnect, and rollback safeguards.
+
+### H4Code Mobile/EAS Overlay
+
+- The mobile app is built from `apps/mobile`; do not run EAS from the repository root.
+- H4Code Expo configuration belongs in the personal foundation commit: Expo owner/project, EAS project ID, bundle/package ID base, and preview build profiles.
+- Keep native build fixes, app feature work, and personal EAS/account wiring in separate commits. Native fixes are the most likely mobile changes to cherry-pick onto an upstream PR branch.
+- For preview builds, follow upstream's environment shape: `APP_VARIANT=preview`, `MOBILE_VERSION_POLICY=fingerprint`, and EAS environment `preview`.
+- After an upstream sync changes native runtime inputs, run `vp run runtime:preview:refresh` from `apps/mobile` and amend the resulting `eas.json` pin into the foundation commit before starting preview builds.

@@ -91,6 +91,32 @@ The native lint task runs SwiftLint for Swift plus ktlint and detekt for Kotlin.
 
 CI uses Expo fingerprinting with the `preview:dev` profile to reuse an existing compatible build when possible, or start a new internal EAS build when native runtime inputs change. Production and default local builds continue to use the `appVersion` runtime policy.
 
+The persistent `preview` profile pins a combined iOS/Android fingerprint as its runtime version. EAS compares the fingerprint calculated before upload with one calculated after managed prebuild; those inputs differ in this monorepo because prebuild creates native directories and resolves config-plugin files outside `apps/mobile`. The explicit pin keeps both phases consistent while still changing whenever native inputs change.
+
+Refresh the pin before a preview build after native code, native dependencies, Expo config, config plugins, or patches change:
+
+```bash
+vp run runtime:preview:refresh
+```
+
+Commit the resulting `eas.json` change with the native changes before starting EAS builds.
+
+This fork's local EAS overlay targets `@h14h/h4code`:
+
+- Expo project: <https://expo.dev/accounts/h14h/projects/h4code>
+- EAS project ID: `64e1574c-280b-49a0-989e-471d942c0b4f`
+- iOS/Android app ID base: `com.h14h.h4code`
+
+The overlay is intentionally concentrated in `app.config.ts`, so it can be kept as a small patch and reapplied after upstream updates. Override the defaults with repository-root `.env.local` values only if you need a different Expo account, EAS project, app ID base, or Apple team:
+
+```bash
+T3CODE_MOBILE_EXPO_OWNER=h14h
+T3CODE_MOBILE_EXPO_SLUG=h4code
+T3CODE_MOBILE_EAS_PROJECT_ID=64e1574c-280b-49a0-989e-471d942c0b4f
+T3CODE_MOBILE_APP_ID_BASE=com.h14h.h4code
+T3CODE_MOBILE_APPLE_TEAM_ID=YOURTEAMID
+```
+
 For preview or production EAS environments, set `T3CODE_CLERK_PUBLISHABLE_KEY`,
 `T3CODE_CLERK_JWT_TEMPLATE`, and `T3CODE_RELAY_URL`
 as EAS environment variables. Expo config maps the canonical values into the mobile build.
