@@ -15,5 +15,8 @@
 - [Integrations](./integrations/source-control-providers.md)
 - [Mobile](./mobile/app.md)
 - [Operations](./operations/ci.md)
+  - [Syncing H4Code to the latest upstream nightly](./operations/upstream-sync.md)
+  - [Composing the H4Code `serve` branch](./operations/serve-composition.md)
+  - [Updating `serve` without breaking remote reconnects](./operations/upstream-dev-server-update.md)
 - [Providers](./providers/codex.md)
 - [Reference](./reference/encyclopedia.md)
