@@ -6,6 +6,7 @@
 - [Integrations](./integrations/source-control-providers.md)
 - [Mobile](./mobile/app.md)
 - [Operations](./operations/ci.md)
+  - [Updating `dev` without breaking remote reconnects](./operations/upstream-dev-server-update.md)
 - [Providers](./providers/codex.md)
 - [Reference](./reference/encyclopedia.md)
 - [User guides](./user/keybindings.md)
