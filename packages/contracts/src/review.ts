@@ -1,5 +1,5 @@
 import * as Schema from "effect/Schema";
-import { TrimmedNonEmptyString } from "./baseSchemas.ts";
+import { NonNegativeInt, ThreadId, TrimmedNonEmptyString } from "./baseSchemas.ts";
 import { GitCommandError } from "./git.ts";
 import { VcsError } from "./vcs.ts";
 
@@ -34,3 +34,55 @@ export type ReviewDiffPreviewResult = typeof ReviewDiffPreviewResult.Type;
 
 export const ReviewDiffPreviewError = Schema.Union([VcsError, GitCommandError]);
 export type ReviewDiffPreviewError = typeof ReviewDiffPreviewError.Type;
+
+const ReviewDiffFilePaths = {
+  previousPath: Schema.NullOr(TrimmedNonEmptyString),
+  currentPath: Schema.NullOr(TrimmedNonEmptyString),
+  ignoreWhitespace: Schema.optionalKey(Schema.Boolean),
+};
+
+export const ReviewDiffFileVersionsInput = Schema.Union([
+  Schema.Struct({
+    kind: Schema.Literal("working-tree"),
+    cwd: TrimmedNonEmptyString,
+    diffHash: TrimmedNonEmptyString,
+    ...ReviewDiffFilePaths,
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("branch-range"),
+    cwd: TrimmedNonEmptyString,
+    baseRef: TrimmedNonEmptyString,
+    diffHash: TrimmedNonEmptyString,
+    ...ReviewDiffFilePaths,
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("turn"),
+    threadId: ThreadId,
+    fromTurnCount: NonNegativeInt,
+    toTurnCount: NonNegativeInt,
+    ...ReviewDiffFilePaths,
+  }),
+]);
+export type ReviewDiffFileVersionsInput = typeof ReviewDiffFileVersionsInput.Type;
+
+export const ReviewDiffFileVersion = Schema.Struct({
+  path: TrimmedNonEmptyString,
+  contents: Schema.String,
+  byteLength: NonNegativeInt,
+  truncated: Schema.Boolean,
+});
+export type ReviewDiffFileVersion = typeof ReviewDiffFileVersion.Type;
+
+export const ReviewDiffFileVersionsResult = Schema.Struct({
+  original: Schema.NullOr(ReviewDiffFileVersion),
+  updated: Schema.NullOr(ReviewDiffFileVersion),
+});
+export type ReviewDiffFileVersionsResult = typeof ReviewDiffFileVersionsResult.Type;
+
+export class ReviewDiffFileVersionsError extends Schema.TaggedErrorClass<ReviewDiffFileVersionsError>()(
+  "ReviewDiffFileVersionsError",
+  {
+    message: TrimmedNonEmptyString,
+    cause: Schema.optional(Schema.Defect()),
+  },
+) {}

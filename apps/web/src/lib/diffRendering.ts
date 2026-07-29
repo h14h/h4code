@@ -144,11 +144,27 @@ export function getRenderablePatch(
 }
 
 export function resolveFileDiffPath(fileDiff: FileDiffMetadata): string {
-  const raw = fileDiff.name ?? fileDiff.prevName ?? "";
+  return stripGitDiffPath(fileDiff.name ?? fileDiff.prevName ?? "");
+}
+
+function stripGitDiffPath(raw: string): string {
   if (raw.startsWith("a/") || raw.startsWith("b/")) {
     return raw.slice(2);
   }
   return raw;
+}
+
+export function resolveFileDiffVersionPaths(fileDiff: FileDiffMetadata): {
+  previousPath: string | null;
+  currentPath: string | null;
+} {
+  const previousPath = stripGitDiffPath(fileDiff.prevName ?? fileDiff.name ?? "");
+  const currentPath = stripGitDiffPath(fileDiff.name ?? fileDiff.prevName ?? "");
+
+  return {
+    previousPath: fileDiff.type === "new" || previousPath.length === 0 ? null : previousPath,
+    currentPath: fileDiff.type === "deleted" || currentPath.length === 0 ? null : currentPath,
+  };
 }
 
 export function buildFileDiffRenderKey(fileDiff: FileDiffMetadata): string {

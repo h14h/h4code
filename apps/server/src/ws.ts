@@ -39,6 +39,7 @@ import {
   ProjectReadFileError,
   ProjectSearchEntriesError,
   ProjectWriteFileError,
+  ReviewDiffFileVersionsError,
   RelayClientInstallFailedError,
   type RelayClientInstallProgressEvent,
   type ServerSelfUpdateError,
@@ -120,6 +121,14 @@ import * as SessionStore from "./auth/SessionStore.ts";
 import { failEnvironmentAuthInvalid, failEnvironmentInternal } from "./auth/http.ts";
 import * as RelayClient from "@t3tools/shared/relayClient";
 const isOrchestrationDispatchCommandError = Schema.is(OrchestrationDispatchCommandError);
+const isReviewDiffFileVersionsError = Schema.is(ReviewDiffFileVersionsError);
+const toReviewDiffFileVersionsError = (cause: unknown) =>
+  isReviewDiffFileVersionsError(cause)
+    ? cause
+    : new ReviewDiffFileVersionsError({
+        message: "Failed to load Markdown preview versions",
+        cause,
+      });
 
 const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
 const EDITOR_DISCOVERY_TIMEOUT = Duration.seconds(5);
@@ -1817,6 +1826,18 @@ const makeWsRpcLayer = (
           observeRpcEffect(WS_METHODS.reviewGetDiffPreview, review.getDiffPreview(input), {
             "rpc.aggregate": "review",
           }),
+        [WS_METHODS.reviewGetDiffFileVersions]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.reviewGetDiffFileVersions,
+            input.kind === "turn"
+              ? checkpointDiffQuery
+                  .getFileVersions(input)
+                  .pipe(Effect.mapError(toReviewDiffFileVersionsError))
+              : review
+                  .getDiffFileVersions(input)
+                  .pipe(Effect.mapError(toReviewDiffFileVersionsError)),
+            { "rpc.aggregate": "review" },
+          ),
         [WS_METHODS.terminalOpen]: (input) =>
           observeRpcEffect(WS_METHODS.terminalOpen, terminalManager.open(input), {
             "rpc.aggregate": "terminal",

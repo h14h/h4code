@@ -18,6 +18,7 @@ import {
   type VcsCreateRefResult,
   type VcsCreateWorktreeInput,
   type VcsCreateWorktreeResult,
+  type ReviewDiffFileVersion,
   type ReviewDiffPreviewInput,
   type ReviewDiffPreviewResult,
   type VcsInitInput,
@@ -221,6 +222,11 @@ export class GitVcsDriver extends Context.Service<
     readonly getReviewDiffPreview: (
       input: ReviewDiffPreviewInput,
     ) => Effect.Effect<ReviewDiffPreviewResult, GitCommandError>;
+    readonly readFileAtRevision: (input: {
+      readonly cwd: string;
+      readonly revision: string;
+      readonly relativePath: string;
+    }) => Effect.Effect<ReviewDiffFileVersion | null, GitCommandError>;
     readonly readConfigValue: (
       cwd: string,
       key: string,
@@ -270,6 +276,7 @@ export class GitVcsDriver extends Context.Service<
 const WORKSPACE_FILES_MAX_OUTPUT_BYTES = 16 * 1024 * 1024;
 const GIT_CHECK_IGNORE_MAX_STDIN_BYTES = 256 * 1024;
 const CHECKPOINT_DIFF_MAX_OUTPUT_BYTES = 10_000_000;
+const CHECKPOINT_FILE_MAX_OUTPUT_BYTES = 1_000_000;
 const WORKSPACE_GIT_HARDENED_CONFIG_ARGS = [
   "-c",
   "core.fsmonitor=false",
@@ -831,6 +838,37 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
       }
 
       return result.stdout;
+    }),
+
+    readFile: Effect.fn("GitVcsDriver.checkpoints.readFile")(function* (input) {
+      const objectSpec = `${input.checkpointRef}:${input.relativePath}`;
+      const sizeResult = yield* execute({
+        operation: "GitVcsDriver.checkpoints.readFile.size",
+        cwd: input.cwd,
+        args: ["cat-file", "-s", objectSpec],
+        allowNonZeroExit: true,
+        maxOutputBytes: 4_096,
+      });
+      if (sizeResult.exitCode !== 0) return null;
+
+      const byteLength = Number.parseInt(sizeResult.stdout.trim(), 10);
+      if (!Number.isSafeInteger(byteLength) || byteLength < 0) return null;
+
+      const contentsResult = yield* execute({
+        operation: "GitVcsDriver.checkpoints.readFile.contents",
+        cwd: input.cwd,
+        args: ["cat-file", "blob", objectSpec],
+        allowNonZeroExit: true,
+        maxOutputBytes: CHECKPOINT_FILE_MAX_OUTPUT_BYTES,
+      });
+      if (contentsResult.exitCode !== 0 || contentsResult.stdout.includes("\0")) return null;
+
+      return {
+        path: input.relativePath,
+        contents: contentsResult.stdout,
+        byteLength,
+        truncated: contentsResult.stdoutTruncated,
+      };
     }),
 
     deleteCheckpointRefs: Effect.fn("GitVcsDriver.checkpoints.deleteCheckpointRefs")(

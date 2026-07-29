@@ -13,6 +13,9 @@ import {
   type OrchestrationGetFullThreadDiffResult,
   type OrchestrationGetTurnDiffInput,
   type OrchestrationGetTurnDiffResult as OrchestrationGetTurnDiffResultType,
+  type ReviewDiffFileVersionsInput,
+  ReviewDiffFileVersionsError,
+  type ReviewDiffFileVersionsResult,
   type ThreadId,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
@@ -22,6 +25,7 @@ import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
 import * as ProjectionSnapshotQuery from "../orchestration/Services/ProjectionSnapshotQuery.ts";
+import { diffContainsMarkdownFileSelection } from "../review/DiffFileSelection.ts";
 import {
   CheckpointDiffResultInvalidError,
   CheckpointRefUnavailableError,
@@ -29,7 +33,7 @@ import {
   CheckpointTurnRangeUnavailableError,
   CheckpointWorkspacePathMissingError,
 } from "./Errors.ts";
-import type { CheckpointServiceError } from "./Errors.ts";
+import type { CheckpointDiffOperation, CheckpointServiceError } from "./Errors.ts";
 import { checkpointRefForThreadTurn } from "./Utils.ts";
 import * as CheckpointStore from "./CheckpointStore.ts";
 
@@ -45,6 +49,13 @@ export class CheckpointDiffQuery extends Context.Service<
     readonly getTurnDiff: (
       input: OrchestrationGetTurnDiffInput,
     ) => Effect.Effect<OrchestrationGetTurnDiffResultType, CheckpointServiceError>;
+
+    readonly getFileVersions: (
+      input: Extract<ReviewDiffFileVersionsInput, { readonly kind: "turn" }>,
+    ) => Effect.Effect<
+      ReviewDiffFileVersionsResult,
+      CheckpointServiceError | ReviewDiffFileVersionsError
+    >;
 
     /**
      * Read the full patch diff across a thread range of checkpoints.
@@ -79,36 +90,18 @@ export const make = Effect.gen(function* () {
   const projectionSnapshotQuery = yield* ProjectionSnapshotQuery.ProjectionSnapshotQuery;
   const checkpointStore = yield* CheckpointStore.CheckpointStore;
 
-  const getTurnDiff: CheckpointDiffQuery["Service"]["getTurnDiff"] = Effect.fn("getTurnDiff")(
-    function* (input) {
-      const operation = "CheckpointDiffQuery.getTurnDiff";
-      const ignoreWhitespace = input.ignoreWhitespace ?? true;
-      yield* Effect.annotateCurrentSpan({
-        "checkpoint.thread_id": input.threadId,
-        "checkpoint.from_turn_count": input.fromTurnCount,
-        "checkpoint.to_turn_count": input.toTurnCount,
-        "checkpoint.ignore_whitespace": ignoreWhitespace,
-      });
-
-      if (input.fromTurnCount === input.toTurnCount) {
-        const emptyDiff: OrchestrationGetTurnDiffResultType = {
-          threadId: input.threadId,
-          fromTurnCount: input.fromTurnCount,
-          toTurnCount: input.toTurnCount,
-          diff: "",
-        };
-        if (!isTurnDiffResult(emptyDiff)) {
-          return yield* new CheckpointDiffResultInvalidError({
-            operation,
-            threadId: input.threadId,
-          });
-        }
-        return emptyDiff;
-      }
-
-      const threadContext = yield* projectionSnapshotQuery
-        .getThreadCheckpointContext(input.threadId)
-        .pipe(Effect.withSpan("checkpoint.turnDiff.lookupContext"));
+  const resolveTurnCheckpointRange = Effect.fn("CheckpointDiffQuery.resolveTurnCheckpointRange")(
+    function* (
+      operation: CheckpointDiffOperation,
+      input: {
+        readonly threadId: ThreadId;
+        readonly fromTurnCount: number;
+        readonly toTurnCount: number;
+      },
+    ) {
+      const threadContext = yield* projectionSnapshotQuery.getThreadCheckpointContext(
+        input.threadId,
+      );
       if (Option.isNone(threadContext)) {
         return yield* new CheckpointThreadNotFoundError({
           operation,
@@ -164,6 +157,42 @@ export const make = Effect.gen(function* () {
         });
       }
 
+      return { workspaceCwd, fromCheckpointRef, toCheckpointRef };
+    },
+  );
+
+  const getTurnDiff: CheckpointDiffQuery["Service"]["getTurnDiff"] = Effect.fn("getTurnDiff")(
+    function* (input) {
+      const operation = "CheckpointDiffQuery.getTurnDiff";
+      const ignoreWhitespace = input.ignoreWhitespace ?? true;
+      yield* Effect.annotateCurrentSpan({
+        "checkpoint.thread_id": input.threadId,
+        "checkpoint.from_turn_count": input.fromTurnCount,
+        "checkpoint.to_turn_count": input.toTurnCount,
+        "checkpoint.ignore_whitespace": ignoreWhitespace,
+      });
+
+      if (input.fromTurnCount === input.toTurnCount) {
+        const emptyDiff: OrchestrationGetTurnDiffResultType = {
+          threadId: input.threadId,
+          fromTurnCount: input.fromTurnCount,
+          toTurnCount: input.toTurnCount,
+          diff: "",
+        };
+        if (!isTurnDiffResult(emptyDiff)) {
+          return yield* new CheckpointDiffResultInvalidError({
+            operation,
+            threadId: input.threadId,
+          });
+        }
+        return emptyDiff;
+      }
+
+      const { workspaceCwd, fromCheckpointRef, toCheckpointRef } =
+        yield* resolveTurnCheckpointRange(operation, input).pipe(
+          Effect.withSpan("checkpoint.turnDiff.lookupContext"),
+        );
+
       const diff = yield* checkpointStore
         .diffCheckpoints({
           cwd: workspaceCwd,
@@ -185,6 +214,48 @@ export const make = Effect.gen(function* () {
       return turnDiff;
     },
   );
+
+  const getFileVersions: CheckpointDiffQuery["Service"]["getFileVersions"] = Effect.fn(
+    "CheckpointDiffQuery.getFileVersions",
+  )(function* (input) {
+    const operation = "CheckpointDiffQuery.getFileVersions";
+    const { workspaceCwd, fromCheckpointRef, toCheckpointRef } = yield* resolveTurnCheckpointRange(
+      operation,
+      input,
+    );
+
+    const diff = yield* checkpointStore.diffCheckpoints({
+      cwd: workspaceCwd,
+      fromCheckpointRef,
+      toCheckpointRef,
+      fallbackFromToHead: false,
+      ignoreWhitespace: input.ignoreWhitespace ?? true,
+    });
+    if (!diffContainsMarkdownFileSelection(diff, input)) {
+      return yield* new ReviewDiffFileVersionsError({
+        message: "Markdown preview selection no longer matches the selected diff",
+      });
+    }
+
+    const [original, updated] = yield* Effect.all([
+      input.previousPath
+        ? checkpointStore.readFile({
+            cwd: workspaceCwd,
+            checkpointRef: fromCheckpointRef,
+            relativePath: input.previousPath,
+          })
+        : Effect.succeed(null),
+      input.currentPath
+        ? checkpointStore.readFile({
+            cwd: workspaceCwd,
+            checkpointRef: toCheckpointRef,
+            relativePath: input.currentPath,
+          })
+        : Effect.succeed(null),
+    ]);
+
+    return { original, updated };
+  });
 
   const getFullThreadDiff: CheckpointDiffQuery["Service"]["getFullThreadDiff"] = Effect.fn(
     "CheckpointDiffQuery.getFullThreadDiff",
@@ -284,6 +355,7 @@ export const make = Effect.gen(function* () {
 
   return CheckpointDiffQuery.of({
     getTurnDiff,
+    getFileVersions,
     getFullThreadDiff,
   });
 });

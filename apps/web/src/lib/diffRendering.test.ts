@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vite-plus/test";
-import { buildPatchCacheKey, getDiffLineStat, getRenderablePatch } from "./diffRendering";
+import {
+  buildPatchCacheKey,
+  getDiffLineStat,
+  getRenderablePatch,
+  resolveFileDiffVersionPaths,
+} from "./diffRendering";
 
 describe("buildPatchCacheKey", () => {
   it("returns a stable cache key for identical content", () => {
@@ -110,5 +115,67 @@ describe("getDiffLineStat", () => {
     if (parsed?.kind !== "files") return;
 
     expect(getDiffLineStat(parsed.files)).toEqual({ additions: 3, deletions: 2 });
+  });
+});
+
+describe("resolveFileDiffVersionPaths", () => {
+  it("returns both paths for a changed file", () => {
+    expect(
+      resolveFileDiffVersionPaths({
+        type: "change",
+        name: "b/README.md",
+        prevName: "a/README.md",
+        isPartial: false,
+        deletionLines: [],
+        additionLines: [],
+        hunks: [],
+        splitLineCount: 0,
+        unifiedLineCount: 0,
+      }),
+    ).toEqual({ previousPath: "README.md", currentPath: "README.md" });
+  });
+
+  it("omits the unavailable side for added and deleted files", () => {
+    expect(
+      resolveFileDiffVersionPaths({
+        type: "new",
+        name: "b/new.md",
+        isPartial: false,
+        deletionLines: [],
+        additionLines: [],
+        hunks: [],
+        splitLineCount: 0,
+        unifiedLineCount: 0,
+      }),
+    ).toEqual({ previousPath: null, currentPath: "new.md" });
+    expect(
+      resolveFileDiffVersionPaths({
+        type: "deleted",
+        name: "b/old.md",
+        prevName: "a/old.md",
+        isPartial: false,
+        deletionLines: [],
+        additionLines: [],
+        hunks: [],
+        splitLineCount: 0,
+        unifiedLineCount: 0,
+      }),
+    ).toEqual({ previousPath: "old.md", currentPath: null });
+  });
+
+  it("preserves both sides of a rename", () => {
+    expect(
+      resolveFileDiffVersionPaths({
+        type: "rename-changed",
+        name: "b/docs/new.md",
+        prevName: "a/docs/old.md",
+        isPartial: false,
+        deletionLines: [],
+        additionLines: [],
+        hunks: [],
+        splitLineCount: 0,
+        unifiedLineCount: 0,
+      }),
+    ).toEqual({ previousPath: "docs/old.md", currentPath: "docs/new.md" });
   });
 });

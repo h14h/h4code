@@ -114,6 +114,62 @@ const initRepoWithCommit = (
     return { initialBranch };
   });
 
+it.effect("reads an exact text file version from a Git revision", () =>
+  Effect.gen(function* () {
+    const cwd = yield* makeTmpDir();
+    yield* initRepoWithCommit(cwd);
+    const initialRevision = yield* git(cwd, ["rev-parse", "HEAD"]);
+    yield* writeTextFile(cwd, "README.md", "# updated\n");
+    yield* git(cwd, ["add", "README.md"]);
+    yield* git(cwd, ["commit", "-m", "update readme"]);
+    const driver = yield* GitVcsDriver.GitVcsDriver;
+
+    const original = yield* driver.readFileAtRevision({
+      cwd,
+      revision: initialRevision,
+      relativePath: "README.md",
+    });
+    const missing = yield* driver.readFileAtRevision({
+      cwd,
+      revision: initialRevision,
+      relativePath: "missing.md",
+    });
+
+    assert.deepStrictEqual(original, {
+      path: "README.md",
+      contents: "# test\n",
+      byteLength: 7,
+      truncated: false,
+    });
+    assert.strictEqual(missing, null);
+  }).pipe(Effect.provide(TestLayer)),
+);
+
+it.effect("truncates large text file versions from a Git revision", () =>
+  Effect.gen(function* () {
+    const cwd = yield* makeTmpDir();
+    yield* initRepoWithCommit(cwd);
+    const contents = "a".repeat(1_000_100);
+    yield* writeTextFile(cwd, "README.md", contents);
+    yield* git(cwd, ["add", "README.md"]);
+    yield* git(cwd, ["commit", "-m", "expand readme"]);
+    const driver = yield* GitVcsDriver.GitVcsDriver;
+
+    const result = yield* driver.readFileAtRevision({
+      cwd,
+      revision: "HEAD",
+      relativePath: "README.md",
+    });
+
+    assert.deepStrictEqual(result, {
+      path: "README.md",
+      contents: contents.slice(0, 1_000_000),
+      byteLength: contents.length,
+      truncated: true,
+    });
+  }).pipe(Effect.provide(TestLayer)),
+);
+
 it.effect("uses stable diagnostics for every parsed non-repository command", () => {
   const commands: Array<{ readonly args: ReadonlyArray<string>; readonly lcAll?: string }> = [];
   const spawner = ChildProcessSpawner.make((command) =>

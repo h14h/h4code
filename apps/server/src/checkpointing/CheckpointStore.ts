@@ -13,7 +13,11 @@
  *
  * @module CheckpointStore
  */
-import { VcsUnsupportedOperationError, type CheckpointRef } from "@t3tools/contracts";
+import {
+  VcsUnsupportedOperationError,
+  type CheckpointRef,
+  type ReviewDiffFileVersion,
+} from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -39,6 +43,12 @@ export interface DiffCheckpointsInput {
   readonly toCheckpointRef: CheckpointRef;
   readonly fallbackFromToHead?: boolean;
   readonly ignoreWhitespace: boolean;
+}
+
+export interface ReadCheckpointFileInput {
+  readonly cwd: string;
+  readonly checkpointRef: CheckpointRef;
+  readonly relativePath: string;
 }
 
 export interface DeleteCheckpointRefsInput {
@@ -84,6 +94,11 @@ export class CheckpointStore extends Context.Service<
     readonly diffCheckpoints: (
       input: DiffCheckpointsInput,
     ) => Effect.Effect<string, CheckpointStoreError>;
+
+    /** Read a text file exactly as captured by a checkpoint ref. */
+    readonly readFile: (
+      input: ReadCheckpointFileInput,
+    ) => Effect.Effect<ReviewDiffFileVersion | null, CheckpointStoreError>;
 
     /**
      * Delete the provided checkpoint refs.
@@ -147,6 +162,11 @@ export const make = Effect.gen(function* () {
     return yield* checkpoints.diffCheckpoints(input);
   });
 
+  const readFile: CheckpointStore["Service"]["readFile"] = Effect.fn("readFile")(function* (input) {
+    const checkpoints = yield* resolveCheckpoints("CheckpointStore.readFile", input.cwd);
+    return yield* checkpoints.readFile(input);
+  });
+
   const deleteCheckpointRefs: CheckpointStore["Service"]["deleteCheckpointRefs"] = Effect.fn(
     "deleteCheckpointRefs",
   )(function* (input) {
@@ -163,6 +183,7 @@ export const make = Effect.gen(function* () {
     hasCheckpointRef,
     restoreCheckpoint,
     diffCheckpoints,
+    readFile,
     deleteCheckpointRefs,
   });
 });

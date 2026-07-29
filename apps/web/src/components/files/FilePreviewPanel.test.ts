@@ -5,7 +5,11 @@ import {
   normalizeFileCommentRange,
   remapFileCommentAnnotations,
 } from "./fileCommentAnnotations";
-import { isMarkdownPreviewFile, setMarkdownTaskChecked } from "./filePreviewMode";
+import {
+  areMarkdownPreviewPaths,
+  isMarkdownPreviewFile,
+  setMarkdownTaskChecked,
+} from "./filePreviewMode";
 
 describe("file comment annotations", () => {
   it("normalizes and formats selected line ranges", () => {
@@ -63,6 +67,16 @@ describe("isMarkdownPreviewFile", () => {
   it("does not treat other text files as markdown", () => {
     expect(isMarkdownPreviewFile("docs/guide.txt")).toBe(false);
     expect(isMarkdownPreviewFile("docs/markdown.ts")).toBe(false);
+  });
+});
+
+describe("areMarkdownPreviewPaths", () => {
+  it("requires every present side of a diff file to be Markdown", () => {
+    expect(areMarkdownPreviewPaths(["docs/old.md", "docs/new.mdx"])).toBe(true);
+    expect(areMarkdownPreviewPaths([null, "README.md"])).toBe(true);
+    expect(areMarkdownPreviewPaths([".env", "README.md"])).toBe(false);
+    expect(areMarkdownPreviewPaths(["README.md", ".env"])).toBe(false);
+    expect(areMarkdownPreviewPaths([null, null])).toBe(false);
   });
 });
 

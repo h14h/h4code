@@ -13,7 +13,9 @@ import {
   ChevronRightIcon,
   ChevronsDownUpIcon,
   ChevronsUpDownIcon,
+  Code2Icon,
   Columns2Icon,
+  EyeIcon,
   PilcrowIcon,
   Rows3Icon,
   SearchIcon,
@@ -33,6 +35,7 @@ import {
   getDiffLineStat,
   getRenderablePatch,
   resolveDiffThemeName,
+  resolveFileDiffVersionPaths,
   resolveFileDiffPath,
 } from "../lib/diffRendering";
 import { areAllDiffFilesCollapsed, toggleAllDiffFiles } from "../lib/diffCollapse";
@@ -71,6 +74,11 @@ import { serverEnvironment } from "../state/server";
 import { reviewEnvironment } from "../state/review";
 import { vcsEnvironment } from "../state/vcs";
 import { buildBaseRefChoices, filterBaseRefChoices } from "../lib/baseRefChoices";
+import { areMarkdownPreviewPaths } from "./files/filePreviewMode";
+import {
+  MarkdownDiffFilePreview,
+  type MarkdownDiffFilePreviewSelection,
+} from "./diffs/MarkdownDiffFilePreview";
 
 type DiffRenderMode = "stacked" | "split";
 type DiffThemeType = "light" | "dark";
@@ -81,7 +89,13 @@ interface CollapsedDiffFilesState {
   readonly fileKeys: ReadonlySet<string>;
 }
 
+interface PreviewedDiffFilesState {
+  readonly scopeKey: string | null;
+  readonly fileKeys: ReadonlySet<string>;
+}
+
 const EMPTY_COLLAPSED_DIFF_FILE_KEYS: ReadonlySet<string> = new Set();
+const EMPTY_PREVIEWED_DIFF_FILE_KEYS: ReadonlySet<string> = new Set();
 
 const DIFF_PANEL_UNSAFE_CSS = `
 [data-diffs-header],
@@ -205,6 +219,10 @@ export default function DiffPanel({
     scopeKey: null,
     fileKeys: EMPTY_COLLAPSED_DIFF_FILE_KEYS,
   }));
+  const [previewedDiffFiles, setPreviewedDiffFiles] = useState<PreviewedDiffFilesState>(() => ({
+    scopeKey: null,
+    fileKeys: EMPTY_PREVIEWED_DIFF_FILE_KEYS,
+  }));
   const codeViewRef = useRef<AnnotatableCodeViewHandle>(null);
 
   const routeThreadRef = useParams({
@@ -302,6 +320,10 @@ export default function DiffPanel({
     collapsedDiffFiles.scopeKey === collapseScopeKey
       ? collapsedDiffFiles.fileKeys
       : EMPTY_COLLAPSED_DIFF_FILE_KEYS;
+  const previewedDiffFileKeys =
+    previewedDiffFiles.scopeKey === collapseScopeKey
+      ? previewedDiffFiles.fileKeys
+      : EMPTY_PREVIEWED_DIFF_FILE_KEYS;
   const reviewSectionTitle = selectedTurn
     ? `Turn ${selectedCheckpointTurnCount ?? "?"}`
     : selectedGitScope === "unstaged"
@@ -363,6 +385,7 @@ export default function DiffPanel({
   const selectedGitSource = branchDiffPreview.data?.sources.find(
     (source) => source.kind === (selectedGitScope === "unstaged" ? "working-tree" : "branch-range"),
   );
+  const selectedDiffCwd = selectedTurn ? activeCwd : branchDiffPreview.data?.cwd;
   const localBranchRefs = useEnvironmentQuery(
     selectedTurnId === null &&
       selectedGitScope === "branch" &&
@@ -452,6 +475,105 @@ export default function DiffPanel({
       }),
     [collapsedDiffFileKeys, renderableFiles],
   );
+  const markdownPreviewFiles = useMemo(
+    () =>
+      codeViewFiles.flatMap((file) => {
+        const paths = resolveFileDiffVersionPaths(file.fileDiff);
+        if (!areMarkdownPreviewPaths([paths.previousPath, paths.currentPath])) {
+          return [];
+        }
+        return [
+          {
+            fileKey: file.fileKey,
+            ...paths,
+          },
+        ];
+      }),
+    [codeViewFiles],
+  );
+  const markdownPreviewFilesByKey = useMemo(
+    () => new Map(markdownPreviewFiles.map((file) => [file.fileKey, file])),
+    [markdownPreviewFiles],
+  );
+  const markdownPreviewSelection = useMemo<MarkdownDiffFilePreviewSelection | null>(() => {
+    if (selectedTurn && selectedCheckpointRange && activeThreadId) {
+      return {
+        kind: "turn",
+        threadId: activeThreadId,
+        ...selectedCheckpointRange,
+        ignoreWhitespace: diffIgnoreWhitespace,
+      };
+    }
+    if (!selectedGitSource || !selectedDiffCwd) return null;
+    if (selectedGitScope === "unstaged") {
+      return {
+        kind: "working-tree",
+        cwd: selectedDiffCwd,
+        diffHash: selectedGitSource.diffHash,
+        ignoreWhitespace: diffIgnoreWhitespace,
+      };
+    }
+    if (!selectedGitSource.baseRef) return null;
+    return {
+      kind: "branch-range",
+      cwd: selectedDiffCwd,
+      baseRef: selectedGitSource.baseRef,
+      diffHash: selectedGitSource.diffHash,
+      ignoreWhitespace: diffIgnoreWhitespace,
+    };
+  }, [
+    activeThreadId,
+    diffIgnoreWhitespace,
+    selectedCheckpointRange,
+    selectedDiffCwd,
+    selectedGitScope,
+    selectedGitSource,
+    selectedTurn,
+  ]);
+  const originalPreviewDescription = selectedTurn
+    ? `Show the Markdown captured before Turn ${selectedCheckpointTurnCount ?? "?"}.`
+    : selectedGitScope === "unstaged"
+      ? "Show the Markdown at HEAD."
+      : `Show the Markdown at the merge base with ${selectedGitSource?.baseRef ?? "the base branch"}.`;
+  const codeViewFilesWithPreviews = useMemo(
+    () =>
+      codeViewFiles.map((file) => {
+        const markdownFile = markdownPreviewFilesByKey.get(file.fileKey);
+        if (
+          !markdownFile ||
+          !previewedDiffFileKeys.has(file.fileKey) ||
+          !markdownPreviewSelection ||
+          !routeThreadRef ||
+          !selectedDiffCwd
+        ) {
+          return file;
+        }
+        return {
+          ...file,
+          contentOverride: (
+            <MarkdownDiffFilePreview
+              key={`${collapseScopeKey ?? reviewSectionId}:${file.fileKey}`}
+              threadRef={routeThreadRef}
+              cwd={selectedDiffCwd}
+              file={markdownFile}
+              selection={markdownPreviewSelection}
+              originalDescription={originalPreviewDescription}
+            />
+          ),
+        };
+      }),
+    [
+      codeViewFiles,
+      collapseScopeKey,
+      markdownPreviewFilesByKey,
+      markdownPreviewSelection,
+      originalPreviewDescription,
+      previewedDiffFileKeys,
+      reviewSectionId,
+      routeThreadRef,
+      selectedDiffCwd,
+    ],
+  );
   const diffFileKeys = useMemo(() => codeViewFiles.map((file) => file.fileKey), [codeViewFiles]);
   const allDiffFilesCollapsed = areAllDiffFilesCollapsed(diffFileKeys, collapsedDiffFileKeys);
   const diffLineStat = useMemo(() => getDiffLineStat(renderableFiles), [renderableFiles]);
@@ -516,6 +638,21 @@ export default function DiffPanel({
       };
     });
   }, [collapseScopeKey, diffFileKeys]);
+
+  const toggleDiffFilePreview = useCallback(
+    (fileKey: string) => {
+      setPreviewedDiffFiles((current) => {
+        const next = new Set(current.scopeKey === collapseScopeKey ? current.fileKeys : []);
+        if (next.has(fileKey)) {
+          next.delete(fileKey);
+        } else {
+          next.add(fileKey);
+        }
+        return { scopeKey: collapseScopeKey, fileKeys: next };
+      });
+    },
+    [collapseScopeKey],
+  );
 
   const selectTurn = (turnId: TurnId) => {
     if (!routeThreadRef) return;
@@ -878,7 +1015,7 @@ export default function DiffPanel({
                   viewerRef={codeViewRef}
                   key={collapseScopeKey ?? reviewSectionId}
                   className="diff-render-surface h-full min-h-0 overflow-auto"
-                  files={codeViewFiles}
+                  files={codeViewFilesWithPreviews}
                   sectionId={reviewSectionId}
                   sectionTitle={reviewSectionTitle}
                   composerDraftTarget={composerDraftTarget}
@@ -911,6 +1048,43 @@ export default function DiffPanel({
                         </TooltipTrigger>
                         <TooltipPopup side="top">
                           {collapsed ? "Expand diff" : "Collapse diff"}
+                        </TooltipPopup>
+                      </Tooltip>
+                    );
+                  }}
+                  renderHeaderMetadata={(_fileDiff, fileKey) => {
+                    if (!markdownPreviewFilesByKey.has(fileKey) || !markdownPreviewSelection) {
+                      return null;
+                    }
+                    const isPreviewed = previewedDiffFileKeys.has(fileKey);
+                    return (
+                      <Tooltip>
+                        <TooltipTrigger
+                          render={
+                            <Button
+                              type="button"
+                              size="icon-xs"
+                              variant="ghost"
+                              aria-label={
+                                isPreviewed
+                                  ? "Show Markdown source diff"
+                                  : "Show rendered Markdown preview"
+                              }
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                toggleDiffFilePreview(fileKey);
+                              }}
+                            />
+                          }
+                        >
+                          {isPreviewed ? (
+                            <Code2Icon className="size-3.5" />
+                          ) : (
+                            <EyeIcon className="size-3.5" />
+                          )}
+                        </TooltipTrigger>
+                        <TooltipPopup side="top">
+                          {isPreviewed ? "Show source diff" : "Preview Markdown"}
                         </TooltipPopup>
                       </Tooltip>
                     );

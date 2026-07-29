@@ -68,6 +68,7 @@ describe("CheckpointDiffQuery.layer", () => {
             });
             return "full thread diff patch";
           }),
+        readFile: () => Effect.succeed(null),
         deleteCheckpointRefs: () => Effect.void,
       };
 
@@ -177,6 +178,7 @@ describe("CheckpointDiffQuery.layer", () => {
             });
             return "diff patch";
           }),
+        readFile: () => Effect.succeed(null),
         deleteCheckpointRefs: () => Effect.void,
       };
 
@@ -261,6 +263,7 @@ describe("CheckpointDiffQuery.layer", () => {
             diffCheckpointsCalls.push({ ignoreWhitespace });
             return "diff patch";
           }),
+        readFile: () => Effect.succeed(null),
         deleteCheckpointRefs: () => Effect.void,
       };
 
@@ -330,6 +333,7 @@ describe("CheckpointDiffQuery.layer", () => {
           }),
         restoreCheckpoint: () => Effect.succeed(true),
         diffCheckpoints: () => Effect.succeed("diff patch"),
+        readFile: () => Effect.succeed(null),
         deleteCheckpointRefs: () => Effect.void,
       };
 
@@ -384,6 +388,7 @@ describe("CheckpointDiffQuery.layer", () => {
         hasCheckpointRef: () => Effect.succeed(true),
         restoreCheckpoint: () => Effect.succeed(true),
         diffCheckpoints: () => Effect.succeed(""),
+        readFile: () => Effect.succeed(null),
         deleteCheckpointRefs: () => Effect.void,
       };
 
@@ -431,6 +436,122 @@ describe("CheckpointDiffQuery.layer", () => {
       expect(error.message).toBe(
         "Checkpoint invariant violation in CheckpointDiffQuery.getTurnDiff: Thread 'thread-missing' not found.",
       );
+    }),
+  );
+
+  it.effect("loads original and updated files from the exact checkpoint refs", () =>
+    Effect.gen(function* () {
+      const projectId = ProjectId.make("project-file-versions");
+      const threadId = ThreadId.make("thread-file-versions");
+      const fromCheckpointRef = checkpointRefForThreadTurn(threadId, 0);
+      const toCheckpointRef = checkpointRefForThreadTurn(threadId, 1);
+      const reads: Array<{ checkpointRef: CheckpointRef; relativePath: string }> = [];
+      const threadContext = makeThreadCheckpointContext({
+        projectId,
+        threadId,
+        workspaceRoot: "/tmp/workspace",
+        worktreePath: "/tmp/worktree",
+        checkpointTurnCount: 1,
+        checkpointRef: toCheckpointRef,
+      });
+      const layer = CheckpointDiffQuery.layer.pipe(
+        Layer.provide(
+          Layer.mock(CheckpointStore.CheckpointStore)({
+            diffCheckpoints: () =>
+              Effect.succeed(
+                "diff --git a/docs/old.md b/docs/new.md\nsimilarity index 100%\nrename from docs/old.md\nrename to docs/new.md\n",
+              ),
+            readFile: (input) =>
+              Effect.sync(() => {
+                reads.push({
+                  checkpointRef: input.checkpointRef,
+                  relativePath: input.relativePath,
+                });
+                return {
+                  path: input.relativePath,
+                  contents:
+                    input.checkpointRef === fromCheckpointRef ? "# Original\n" : "# Updated\n",
+                  byteLength: 11,
+                  truncated: false,
+                };
+              }),
+          }),
+        ),
+        Layer.provide(
+          Layer.mock(ProjectionSnapshotQuery.ProjectionSnapshotQuery)({
+            getThreadCheckpointContext: () => Effect.succeed(Option.some(threadContext)),
+          }),
+        ),
+      );
+
+      const result = yield* Effect.gen(function* () {
+        const query = yield* CheckpointDiffQuery.CheckpointDiffQuery;
+        return yield* query.getFileVersions({
+          kind: "turn",
+          threadId,
+          fromTurnCount: 0,
+          toTurnCount: 1,
+          previousPath: "docs/old.md",
+          currentPath: "docs/new.md",
+          ignoreWhitespace: true,
+        });
+      }).pipe(Effect.provide(layer));
+
+      expect(reads).toEqual([
+        { checkpointRef: fromCheckpointRef, relativePath: "docs/old.md" },
+        { checkpointRef: toCheckpointRef, relativePath: "docs/new.md" },
+      ]);
+      expect(result.original?.contents).toBe("# Original\n");
+      expect(result.updated?.contents).toBe("# Updated\n");
+    }),
+  );
+
+  it.effect("rejects checkpoint file versions outside the selected diff", () =>
+    Effect.gen(function* () {
+      const projectId = ProjectId.make("project-file-selection");
+      const threadId = ThreadId.make("thread-file-selection");
+      const toCheckpointRef = checkpointRefForThreadTurn(threadId, 1);
+      const threadContext = makeThreadCheckpointContext({
+        projectId,
+        threadId,
+        workspaceRoot: "/tmp/workspace",
+        worktreePath: "/tmp/worktree",
+        checkpointTurnCount: 1,
+        checkpointRef: toCheckpointRef,
+      });
+      const layer = CheckpointDiffQuery.layer.pipe(
+        Layer.provide(
+          Layer.mock(CheckpointStore.CheckpointStore)({
+            diffCheckpoints: () =>
+              Effect.succeed(
+                "diff --git a/README.md b/README.md\n--- a/README.md\n+++ b/README.md\n@@ -1 +1 @@\n-old\n+new\n",
+              ),
+            readFile: () => Effect.die("invalid selection must not read checkpoint files"),
+          }),
+        ),
+        Layer.provide(
+          Layer.mock(ProjectionSnapshotQuery.ProjectionSnapshotQuery)({
+            getThreadCheckpointContext: () => Effect.succeed(Option.some(threadContext)),
+          }),
+        ),
+      );
+
+      const error = yield* Effect.gen(function* () {
+        const query = yield* CheckpointDiffQuery.CheckpointDiffQuery;
+        return yield* query
+          .getFileVersions({
+            kind: "turn",
+            threadId,
+            fromTurnCount: 0,
+            toTurnCount: 1,
+            previousPath: ".env",
+            currentPath: ".env",
+            ignoreWhitespace: true,
+          })
+          .pipe(Effect.flip);
+      }).pipe(Effect.provide(layer));
+
+      expect(error._tag).toBe("ReviewDiffFileVersionsError");
     }),
   );
 });

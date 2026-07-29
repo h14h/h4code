@@ -1,5 +1,10 @@
 export const isMarkdownPreviewFile = (path: string): boolean => /\.(?:md|mdx)$/i.test(path);
 
+export function areMarkdownPreviewPaths(paths: ReadonlyArray<string | null>): boolean {
+  const filePaths = paths.filter((path): path is string => path !== null);
+  return filePaths.length > 0 && filePaths.every(isMarkdownPreviewFile);
+}
+
 export function setMarkdownTaskChecked(
   markdown: string,
   markerOffset: number,

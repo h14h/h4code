@@ -21,6 +21,7 @@ import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
 import {
   GitCommandError,
+  type ReviewDiffFileVersion,
   type ReviewDiffPreviewInput,
   type ReviewDiffPreviewSource,
   type VcsRef,
@@ -46,6 +47,7 @@ const RANGE_DIFF_SUMMARY_MAX_OUTPUT_BYTES = 19_000;
 const RANGE_DIFF_PATCH_MAX_OUTPUT_BYTES = 59_000;
 const REVIEW_DIFF_PATCH_MAX_OUTPUT_BYTES = 120_000;
 const REVIEW_UNTRACKED_DIFF_MAX_OUTPUT_BYTES = 80_000;
+const REVIEW_DIFF_FILE_MAX_OUTPUT_BYTES = 1_000_000;
 const WORKSPACE_FILES_MAX_OUTPUT_BYTES = 120_000;
 const STATUS_UPSTREAM_REFRESH_INTERVAL = Duration.seconds(15);
 const STATUS_UPSTREAM_REFRESH_TIMEOUT = Duration.seconds(5);
@@ -2212,6 +2214,44 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     };
   });
 
+  const readFileAtRevision: GitVcsDriver.GitVcsDriver["Service"]["readFileAtRevision"] = Effect.fn(
+    "GitVcsDriver.readFileAtRevision",
+  )(function* (input) {
+    const objectSpec = `${input.revision}:${input.relativePath}`;
+    const sizeResult = yield* executeGit(
+      "GitVcsDriver.readFileAtRevision.size",
+      input.cwd,
+      ["cat-file", "-s", objectSpec],
+      {
+        allowNonZeroExit: true,
+        maxOutputBytes: 4_096,
+      },
+    );
+    if (sizeResult.exitCode !== 0) return null;
+
+    const byteLength = Number.parseInt(sizeResult.stdout.trim(), 10);
+    if (!Number.isSafeInteger(byteLength) || byteLength < 0) return null;
+
+    const contentsResult = yield* executeGit(
+      "GitVcsDriver.readFileAtRevision.contents",
+      input.cwd,
+      ["cat-file", "blob", objectSpec],
+      {
+        allowNonZeroExit: true,
+        maxOutputBytes: REVIEW_DIFF_FILE_MAX_OUTPUT_BYTES,
+        appendTruncationMarker: true,
+      },
+    );
+    if (contentsResult.exitCode !== 0 || contentsResult.stdout.includes("\0")) return null;
+
+    return {
+      path: input.relativePath,
+      contents: contentsResult.stdout,
+      byteLength,
+      truncated: contentsResult.stdoutTruncated,
+    } satisfies ReviewDiffFileVersion;
+  });
+
   const readConfigValue: GitVcsDriver.GitVcsDriver["Service"]["readConfigValue"] = (cwd, key) =>
     runGitStdout("GitVcsDriver.readConfigValue", cwd, ["config", "--get", key], true).pipe(
       Effect.map((stdout) => stdout.trim()),
@@ -2838,6 +2878,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     pullCurrentBranch: (cwd) => withListRefsInvalidation(cwd, pullCurrentBranch(cwd)),
     readRangeContext,
     getReviewDiffPreview,
+    readFileAtRevision,
     readConfigValue,
     listRefs,
     createWorktree: (input) => withListRefsInvalidation(input.cwd, createWorktree(input)),

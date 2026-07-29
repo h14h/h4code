@@ -1,9 +1,9 @@
 import type {
   AnnotationSide,
-  CodeViewDiffItem,
   CodeViewItem,
   DiffLineAnnotation,
   FileDiffMetadata,
+  LineAnnotation,
   SelectedLineRange,
 } from "@pierre/diffs";
 import { CodeView, type CodeViewHandle, type CodeViewProps } from "@pierre/diffs/react";
@@ -30,11 +30,19 @@ interface DiffCommentAnnotationEntry {
 }
 
 interface DiffCommentAnnotationGroup {
+  kind: "comments";
   entries: DiffCommentAnnotationEntry[];
 }
 
+interface DiffContentOverrideAnnotation {
+  kind: "content-override";
+  content: ReactNode;
+}
+
+type AnnotatableCodeViewAnnotation = DiffCommentAnnotationGroup | DiffContentOverrideAnnotation;
+
 type DiffCommentLineAnnotation = DiffLineAnnotation<DiffCommentAnnotationGroup>;
-export type AnnotatableCodeViewHandle = CodeViewHandle<DiffCommentAnnotationGroup>;
+export type AnnotatableCodeViewHandle = CodeViewHandle<AnnotatableCodeViewAnnotation>;
 const EMPTY_REVIEW_COMMENTS: ReadonlyArray<ReviewCommentContext> = [];
 
 function annotationSide(range: SelectedLineRange): AnnotationSide {
@@ -56,7 +64,7 @@ function appendAnnotationEntry(
       {
         side,
         lineNumber: range.end,
-        metadata: { entries: [entry] },
+        metadata: { kind: "comments", entries: [entry] },
       },
     ];
   }
@@ -64,7 +72,10 @@ function appendAnnotationEntry(
     index === annotationIndex
       ? {
           ...annotation,
-          metadata: { entries: [...annotation.metadata.entries, entry] },
+          metadata: {
+            kind: "comments",
+            entries: [...annotation.metadata.entries, entry],
+          },
         }
       : annotation,
   );
@@ -76,11 +87,12 @@ interface AnnotatableCodeViewProps {
     filePath: string;
     fileKey: string;
     collapsed: boolean;
+    contentOverride?: ReactNode;
   }>;
   sectionId: string;
   sectionTitle: string;
   composerDraftTarget: ScopedThreadRef | DraftId;
-  options: NonNullable<CodeViewProps<DiffCommentAnnotationGroup>["options"]>;
+  options: NonNullable<CodeViewProps<AnnotatableCodeViewAnnotation>["options"]>;
   viewerRef?: Ref<AnnotatableCodeViewHandle>;
   className?: string;
   renderHeaderPrefix: (
@@ -88,10 +100,15 @@ interface AnnotatableCodeViewProps {
     fileKey: string,
     collapsed: boolean,
   ) => ReactNode;
+  renderHeaderMetadata?: (
+    fileDiff: FileDiffMetadata,
+    fileKey: string,
+    collapsed: boolean,
+  ) => ReactNode;
 }
 
 interface DiffSelectionContext {
-  item: CodeViewItem<DiffCommentAnnotationGroup>;
+  item: CodeViewItem<AnnotatableCodeViewAnnotation>;
 }
 
 export function AnnotatableCodeView({
@@ -103,6 +120,7 @@ export function AnnotatableCodeView({
   viewerRef,
   className,
   renderHeaderPrefix,
+  renderHeaderMetadata,
 }: AnnotatableCodeViewProps) {
   const addReviewComment = useComposerDraftStore((store) => store.addReviewComment);
   const removeReviewComment = useComposerDraftStore((store) => store.removeReviewComment);
@@ -119,9 +137,32 @@ export function AnnotatableCodeView({
   } | null>(null);
 
   const filesByKey = useMemo(() => new Map(files.map((file) => [file.fileKey, file])), [files]);
-  const items = useMemo<CodeViewDiffItem<DiffCommentAnnotationGroup>[]>(
+  const items = useMemo<CodeViewItem<AnnotatableCodeViewAnnotation>[]>(
     () =>
-      files.map(({ fileDiff, filePath, fileKey, collapsed }) => {
+      files.map(({ fileDiff, filePath, fileKey, collapsed, contentOverride }) => {
+        if (contentOverride !== undefined) {
+          return {
+            id: fileKey,
+            type: "file",
+            file: {
+              name: filePath,
+              contents: "",
+              cacheKey: `${fileKey}:preview`,
+            },
+            annotations: [
+              {
+                lineNumber: 0,
+                metadata: {
+                  kind: "content-override",
+                  content: contentOverride,
+                },
+              } satisfies LineAnnotation<AnnotatableCodeViewAnnotation>,
+            ],
+            collapsed,
+            version: fnv1a32(`${collapsed ? "1" : "0"}:preview`),
+          };
+        }
+
         const persisted = reviewComments
           .filter(
             (comment) =>
@@ -221,6 +262,7 @@ export function AnnotatableCodeView({
           side: annotationSide(range),
           lineNumber: range.end,
           metadata: {
+            kind: "comments",
             entries: [{ id, kind: "draft", range, rangeLabel: comment.rangeLabel, text: "" }],
           },
         },
@@ -231,7 +273,7 @@ export function AnnotatableCodeView({
 
   const hasOpenComment = draft !== null;
   return (
-    <CodeView<DiffCommentAnnotationGroup>
+    <CodeView<AnnotatableCodeViewAnnotation>
       {...(viewerRef ? { ref: viewerRef } : {})}
       {...(className ? { className } : {})}
       items={items}
@@ -243,26 +285,40 @@ export function AnnotatableCodeView({
         enableLineSelection: !hasOpenComment,
         onLineSelectionEnd: beginComment,
       }}
-      renderHeaderPrefix={(item) =>
-        item.type === "diff"
-          ? renderHeaderPrefix(item.fileDiff, item.id, item.collapsed === true)
-          : null
-      }
-      renderAnnotation={(annotation) => (
-        <div className="py-1">
-          {annotation.metadata.entries.map((entry) => (
-            <LocalCommentAnnotation
-              key={entry.id}
-              kind={entry.kind}
-              rangeLabel={entry.rangeLabel}
-              text={entry.text}
-              onCancel={() => removeEntry(entry.id)}
-              onComment={(text) => submitEntry(entry.id, text)}
-              onDelete={() => removeEntry(entry.id)}
-            />
-          ))}
-        </div>
-      )}
+      renderHeaderPrefix={(item) => {
+        const file = filesByKey.get(item.id);
+        return file ? renderHeaderPrefix(file.fileDiff, item.id, item.collapsed === true) : null;
+      }}
+      {...(renderHeaderMetadata
+        ? {
+            renderHeaderMetadata: (item: CodeViewItem<AnnotatableCodeViewAnnotation>) => {
+              const file = filesByKey.get(item.id);
+              return file
+                ? renderHeaderMetadata(file.fileDiff, item.id, item.collapsed === true)
+                : null;
+            },
+          }
+        : {})}
+      renderAnnotation={(annotation) => {
+        if (annotation.metadata.kind === "content-override") {
+          return annotation.metadata.content;
+        }
+        return (
+          <div className="py-1">
+            {annotation.metadata.entries.map((entry) => (
+              <LocalCommentAnnotation
+                key={entry.id}
+                kind={entry.kind}
+                rangeLabel={entry.rangeLabel}
+                text={entry.text}
+                onCancel={() => removeEntry(entry.id)}
+                onComment={(text) => submitEntry(entry.id, text)}
+                onDelete={() => removeEntry(entry.id)}
+              />
+            ))}
+          </div>
+        );
+      }}
     />
   );
 }

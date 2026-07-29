@@ -7,6 +7,7 @@ import type {
   VcsInitInput,
   VcsListRemotesResult,
   VcsListWorkspaceFilesResult,
+  ReviewDiffFileVersion,
   ReviewDiffPreviewInput,
   ReviewDiffPreviewResult,
   VcsRepositoryIdentity,
@@ -33,6 +34,12 @@ export interface VcsDiffCheckpointsInput {
   readonly ignoreWhitespace: boolean;
 }
 
+export interface VcsReadCheckpointFileInput {
+  readonly cwd: string;
+  readonly checkpointRef: CheckpointRef;
+  readonly relativePath: string;
+}
+
 export interface VcsDeleteCheckpointRefsInput {
   readonly cwd: string;
   readonly checkpointRefs: ReadonlyArray<CheckpointRef>;
@@ -47,6 +54,9 @@ export interface VcsCheckpointOps {
     input: VcsRestoreCheckpointInput,
   ) => Effect.Effect<boolean, VcsError>;
   readonly diffCheckpoints: (input: VcsDiffCheckpointsInput) => Effect.Effect<string, VcsError>;
+  readonly readFile: (
+    input: VcsReadCheckpointFileInput,
+  ) => Effect.Effect<ReviewDiffFileVersion | null, VcsError>;
   readonly deleteCheckpointRefs: (
     input: VcsDeleteCheckpointRefsInput,
   ) => Effect.Effect<void, VcsError>;
